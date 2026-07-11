@@ -54,6 +54,10 @@ def _kv_row(pdf: ReportPDF, key: str, value: str):
     pdf.cell(45, 6, key, ln=False)
     pdf.set_font("Helvetica", "", 10)
     pdf.multi_cell(0, 6, value if value else "-")
+    # Always return to left margin so callers don't inherit a stale X.
+    # Without this, an empty/short value can leave X near the right edge,
+    # causing "Not enough horizontal space" on the next multi_cell(0, ...).
+    pdf.set_x(pdf.l_margin)
 
 
 def _bullet_list(pdf: ReportPDF, items, color=(0, 0, 0)):
@@ -62,6 +66,9 @@ def _bullet_list(pdf: ReportPDF, items, color=(0, 0, 0)):
     if not items:
         pdf.cell(0, 6, "  - None", ln=True)
     for item in items:
+        # Guard: ensure full page width is available regardless of
+        # whatever X position was left by a prior cell/multi_cell call.
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, f"  - {item}")
     pdf.set_text_color(0, 0, 0)
 
@@ -168,6 +175,7 @@ def generate_report(
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(0, 6, "Comments:", ln=True)
     pdf.set_font("Helvetica", "", 10)
+    pdf.set_x(pdf.l_margin)  # defensive: same guard as _bullet_list
     pdf.multi_cell(0, 6, hr_decision.get("comments") or "-")
 
     if photo_path and os.path.exists(photo_path):
