@@ -8,9 +8,9 @@ HR (human-in-the-loop) decision + comments.
 Uses fpdf2 (pure Python, no system dependencies).
 """
 
-import io
-import tempfile
 import os
+import tempfile
+import unicodedata
 from datetime import datetime
 
 from fpdf import FPDF
@@ -24,11 +24,21 @@ GREY = (90, 90, 90)
 TONE_COLORS = {"success": GREEN, "warning": AMBER, "error": RED}
 
 
+def _s(text: str) -> str:
+    """Sanitize text for fpdf2 core fonts (Latin-1 only).
+    Strips accents/diacritics, replaces unrepresentable chars with '?'."""
+    if not text:
+        return text
+    normalized = unicodedata.normalize("NFKD", text)
+    stripped = "".join(c for c in normalized if not unicodedata.combining(c))
+    return stripped.encode("latin-1", errors="replace").decode("latin-1")
+
+
 class ReportPDF(FPDF):
     def header(self):
         self.set_font("Helvetica", "B", 16)
         self.set_text_color(*PRIMARY)
-        self.cell(0, 10, "AI Resume Screening Co-Pilot - Candidate Report", ln=True)
+        self.cell(0, 10, _s("AI Resume Screening Co-Pilot - Candidate Report"), ln=True)
         self.set_draw_color(*PRIMARY)
         self.set_line_width(0.6)
         self.line(10, 20, 200, 20)
@@ -38,25 +48,22 @@ class ReportPDF(FPDF):
         self.set_y(-15)
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(*GREY)
-        self.cell(0, 10, f"Page {self.page_no()} | Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}", align="C")
+        self.cell(0, 10, _s(f"Page {self.page_no()} | Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}"), align="C")
 
 
 def _section_title(pdf: ReportPDF, text: str):
     pdf.ln(3)
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*PRIMARY)
-    pdf.cell(0, 8, text, ln=True)
+    pdf.cell(0, 8, _s(text), ln=True)
     pdf.set_text_color(0, 0, 0)
 
 
 def _kv_row(pdf: ReportPDF, key: str, value: str):
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(45, 6, key, ln=False)
+    pdf.cell(45, 6, _s(key), ln=False)
     pdf.set_font("Helvetica", "", 10)
-    pdf.multi_cell(0, 6, value if value else "-")
-    # Always return to left margin so callers don't inherit a stale X.
-    # Without this, an empty/short value can leave X near the right edge,
-    # causing "Not enough horizontal space" on the next multi_cell(0, ...).
+    pdf.multi_cell(0, 6, _s(value) if value else "-")
     pdf.set_x(pdf.l_margin)
 
 
@@ -66,10 +73,8 @@ def _bullet_list(pdf: ReportPDF, items, color=(0, 0, 0)):
     if not items:
         pdf.cell(0, 6, "  - None", ln=True)
     for item in items:
-        # Guard: ensure full page width is available regardless of
-        # whatever X position was left by a prior cell/multi_cell call.
         pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 6, f"  - {item}")
+        pdf.multi_cell(0, 6, _s(f"  - {item}"))
     pdf.set_text_color(0, 0, 0)
 
 
@@ -96,7 +101,7 @@ def generate_report(
 
     pdf.set_xy(10, 24)
     pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 8, candidate_info.get("name", "Unknown Candidate"), ln=True)
+    pdf.cell(0, 8, _s(candidate_info.get("name", "Unknown Candidate")), ln=True)
 
     pdf.set_x(10)
     _kv_row(pdf, "Position Applied:", candidate_info.get("position", ""))
@@ -118,7 +123,7 @@ def generate_report(
     pdf.set_text_color(*tone_color)
     pdf.cell(60, 16, f"{score_breakdown.overall_score:.1f} / 100", ln=False)
     pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 16, score_breakdown.recommendation, ln=True)
+    pdf.cell(0, 16, _s(score_breakdown.recommendation), ln=True)
     pdf.set_text_color(0, 0, 0)
 
     # --- Component breakdown table ---
@@ -138,7 +143,7 @@ def generate_report(
         ("Resume Completeness", score_breakdown.completeness_score, "10%", score_breakdown.component_contributions.get("completeness", 0)),
     ]
     for name, raw, weight, contrib in rows:
-        pdf.cell(60, 7, name, border=1)
+        pdf.cell(60, 7, _s(name), border=1)
         pdf.cell(40, 7, f"{raw:.1f}", border=1)
         pdf.cell(40, 7, weight, border=1)
         pdf.cell(40, 7, f"{contrib:.1f}", border=1, ln=True)
@@ -167,16 +172,16 @@ def generate_report(
     decision_color = {"Approved": GREEN, "Rejected": RED}.get(decision, AMBER)
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*decision_color)
-    pdf.cell(0, 8, f"Decision: {decision}", ln=True)
+    pdf.cell(0, 8, _s(f"Decision: {decision}"), ln=True)
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"Reviewed by: {hr_decision.get('reviewer', '-')}", ln=True)
-    pdf.cell(0, 6, f"Reviewed on: {hr_decision.get('timestamp', '-')}", ln=True)
+    pdf.cell(0, 6, _s(f"Reviewed by: {hr_decision.get('reviewer', '-')}"), ln=True)
+    pdf.cell(0, 6, _s(f"Reviewed on: {hr_decision.get('timestamp', '-')}"), ln=True)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(0, 6, "Comments:", ln=True)
     pdf.set_font("Helvetica", "", 10)
-    pdf.set_x(pdf.l_margin)  # defensive: same guard as _bullet_list
-    pdf.multi_cell(0, 6, hr_decision.get("comments") or "-")
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 6, _s(hr_decision.get("comments") or "-"))
 
     if photo_path and os.path.exists(photo_path):
         os.remove(photo_path)
